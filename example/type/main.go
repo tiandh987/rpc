@@ -59,13 +59,17 @@ func main () {
 		mout := mtype.NumOut()
 
 		// Out 返回函数类型的第 i 个输出参数的类型。
+		returnType := mtype.Out(0)
 
+		fmt.Printf("method: %+v\n", method)
 		fmt.Printf("method type: %+v\n", mtype)
 		fmt.Printf("method name: %+v\n", mname)
 		fmt.Printf("method mnum: %+v\n", mnum)
 		fmt.Printf("method mIn1: %+v\n", mIn1)
 		fmt.Printf("method mIn2: %+v\n", mIn2.Kind() == reflect.Ptr)
 		fmt.Printf("method mout: %+v\n", mout)
+		fmt.Printf("method returnType: %+v\n", returnType)
+
 
 
 

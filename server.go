@@ -152,9 +152,9 @@ var typeOfError = reflect.TypeOf((*error)(nil)).Elem()
 
 type methodType struct {
 	sync.Mutex // protects counters
-	method     reflect.Method
-	ArgType    reflect.Type
-	ReplyType  reflect.Type
+	method     reflect.Method  // 服务的方法
+	ArgType    reflect.Type    // 调用方 传入参数类型
+	ReplyType  reflect.Type    // 服务 返回参数类型
 	numCalls   uint
 }
 
@@ -274,6 +274,7 @@ func (server *Server) register(rcvr interface{}, name string, useName bool) erro
 	s.name = sname
 
 	// Install the methods
+	// 将 类型 的所有可导出 rpc 方法注册到 method
 	s.method = suitableMethods(s.typ, true)
 
 	if len(s.method) == 0 {
@@ -299,7 +300,7 @@ func (server *Server) register(rcvr interface{}, name string, useName bool) erro
 // suitableMethods returns suitable Rpc methods of typ, it will report
 // error using log if reportErr is true.
 //
-// 返回 typ 的 Rpc 方法，
+// 返回 typ 的 Rpc 方法，(返回类型的所有可导出的 rpc 方法)
 // 如果 reportErr 为 true，它将使用 log 报告错误。
 func suitableMethods(typ reflect.Type, reportErr bool) map[string]*methodType {
 	methods := make(map[string]*methodType)
@@ -367,6 +368,7 @@ func suitableMethods(typ reflect.Type, reportErr bool) map[string]*methodType {
 		}
 
 		// The return type of the method must be error.
+		// 方法的返回类型必须是 error
 		if returnType := mtype.Out(0); returnType != typeOfError {
 			if reportErr {
 				log.Printf("rpc.Register: return type of method %q is %q, must be error\n", mname, returnType)
