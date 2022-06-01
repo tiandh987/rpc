@@ -168,6 +168,8 @@ type service struct {
 // Request is a header written before every RPC call. It is used internally
 // but documented here as an aid to debugging, such as when analyzing
 // network traffic.
+//
+// Request 是在每次 RPC 调用之前写入的标头。 它在内部使用，但在此处记录以帮助调试，例如在分析网络流量时。
 type Request struct {
 	ServiceMethod string   // format: "Service.Method"
 	Seq           uint64   // sequence number chosen by client
@@ -489,7 +491,9 @@ func (c *gobServerCodec) Close() error {
 // connection. To use an alternate codec, use ServeCodec.
 // See NewClient's comment for information about concurrent access.
 func (server *Server) ServeConn(conn io.ReadWriteCloser) {
+	// NewWriter 返回一个新的 Writer，其缓冲区具有默认大小（4096）。
 	buf := bufio.NewWriter(conn)
+
 	srv := &gobServerCodec{
 		rwc:    conn,
 		dec:    gob.NewDecoder(conn),
@@ -501,6 +505,8 @@ func (server *Server) ServeConn(conn io.ReadWriteCloser) {
 
 // ServeCodec is like ServeConn but uses the specified codec to
 // decode requests and encode responses.
+//
+// ServeCodec 类似于 ServeConn，但使用指定的编解码器来解码请求和编码响应。
 func (server *Server) ServeCodec(codec ServerCodec) {
 	sending := new(sync.Mutex)
 	wg := new(sync.WaitGroup)
@@ -629,6 +635,7 @@ func (server *Server) readRequest(codec ServerCodec) (service *service, mtype *m
 
 func (server *Server) readRequestHeader(codec ServerCodec) (svc *service, mtype *methodType, req *Request, keepReading bool, err error) {
 	// Grab the request header.
+	// 获取请求头。
 	req = server.getRequest()
 	err = codec.ReadRequestHeader(req)
 	if err != nil {
@@ -642,14 +649,20 @@ func (server *Server) readRequestHeader(codec ServerCodec) (svc *service, mtype 
 
 	// We read the header successfully. If we see an error now,
 	// we can still recover and move on to the next request.
+	//
+	// 我们成功读取了头部。 如果我们现在看到错误，我们仍然可以恢复并继续下一个请求。
 	keepReading = true
 
+	// LastIndex 返回 s 中最后一个 substr 实例的索引，如果 s 中不存在 substr，则返回 -1。
 	dot := strings.LastIndex(req.ServiceMethod, ".")
 	if dot < 0 {
 		err = errors.New("rpc: service/method request ill-formed: " + req.ServiceMethod)
 		return
 	}
+
+	// 服务名
 	serviceName := req.ServiceMethod[:dot]
+	// 方法名
 	methodName := req.ServiceMethod[dot+1:]
 
 	// Look up the request.
@@ -658,7 +671,10 @@ func (server *Server) readRequestHeader(codec ServerCodec) (svc *service, mtype 
 		err = errors.New("rpc: can't find service " + req.ServiceMethod)
 		return
 	}
+
+	// 服务
 	svc = svci.(*service)
+	// 服务的方法
 	mtype = svc.method[methodName]
 	if mtype == nil {
 		err = errors.New("rpc: can't find method " + req.ServiceMethod)
@@ -714,6 +730,12 @@ type ServerCodec interface {
 // ServeConn uses the gob wire format (see package gob) on the
 // connection. To use an alternate codec, use ServeCodec.
 // See NewClient's comment for information about concurrent access.
+//
+// ServeConn 在单个连接上运行 DefaultServer。
+// ServeConn 阻塞，一直服务这个连接，直到客户端挂断。
+// 调用者通常在 go 语句中调用 ServeConn。
+// ServeConn 在连接上使用 gob 格式（请参阅包 gob）。 要使用备用编解码器，请使用 ServeCodec。
+// 有关并发访问的信息，请参阅 NewClient 的注释。
 func ServeConn(conn io.ReadWriteCloser) {
 	DefaultServer.ServeConn(conn)
 }
