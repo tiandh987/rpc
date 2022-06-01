@@ -26,18 +26,22 @@ func (e ServerError) Error() string {
 var ErrShutdown = errors.New("connection is shut down")
 
 // Call represents an active RPC.
+// Call 代表一个活动的 RPC
 type Call struct {
-	ServiceMethod string      // The name of the service and method to call.
-	Args          interface{} // The argument to the function (*struct).
-	Reply         interface{} // The reply from the function (*struct).
-	Error         error       // After completion, the error status.
-	Done          chan *Call  // Receives *Call when Go is complete.
+	ServiceMethod string      // The name of the service and method to call. 调用的 服务.方法 名称
+	Args          interface{} // The argument to the function (*struct).     函数参数
+	Reply         interface{} // The reply from the function (*struct).      函数返回
+	Error         error       // After completion, the error status.		 完成后，错误状态
+	Done          chan *Call  // Receives *Call when Go is complete.         Go 完成时，接收 *Call
 }
 
 // Client represents an RPC Client.
 // There may be multiple outstanding Calls associated
 // with a single Client, and a Client may be used by
 // multiple goroutines simultaneously.
+//
+// Client 代表一个 RPC 客户端。
+// 一个客户端可能有多个未完成的调用，一个客户端可能同时被多个 goroutine 使用。
 type Client struct {
 	codec ClientCodec
 
@@ -190,6 +194,11 @@ func (call *Call) done() {
 // so no interlocking is required. However each half may be accessed
 // concurrently so the implementation of conn should protect against
 // concurrent reads or concurrent writes.
+//
+// NewClient 返回一个新的 Client 来处理对连接另一端的服务集的请求。
+// 它向连接的写入端添加一个缓冲区，因此标头和有效负载作为一个单元发送。
+//
+// 连接的读写部分是独立序列化的，所以不需要互锁。 然而，每一半都可以同时访问，因此 conn 的实现应该防止并发读取或并发写入。
 func NewClient(conn io.ReadWriteCloser) *Client {
 	encBuf := bufio.NewWriter(conn)
 	client := &gobClientCodec{conn, gob.NewDecoder(conn), gob.NewEncoder(encBuf), encBuf}
@@ -270,6 +279,7 @@ func DialHTTPPath(network, address, path string) (*Client, error) {
 }
 
 // Dial connects to an RPC server at the specified network address.
+// Dial 连接到指定网络地址的 RPC 服务器。
 func Dial(network, address string) (*Client, error) {
 	conn, err := net.Dial(network, address)
 	if err != nil {
@@ -295,6 +305,11 @@ func (client *Client) Close() error {
 // the invocation. The done channel will signal when the call is complete by returning
 // the same Call object. If done is nil, Go will allocate a new channel.
 // If non-nil, done must be buffered or Go will deliberately crash.
+//
+// Go 异步调用函数。
+// 它返回表示调用的 Call 结构。
+// done 通道将通过返回相同的 Call 对象 在调用完成时发出信号。
+// 如果 done 为 nil，Go 将分配一个新通道。 如果非零，done 必须被缓冲，否则 Go 会故意崩溃。
 func (client *Client) Go(serviceMethod string, args interface{}, reply interface{}, done chan *Call) *Call {
 	call := new(Call)
 	call.ServiceMethod = serviceMethod
@@ -307,6 +322,9 @@ func (client *Client) Go(serviceMethod string, args interface{}, reply interface
 		// done has enough buffer for the number of simultaneous
 		// RPCs that will be using that channel. If the channel
 		// is totally unbuffered, it's best not to run at all.
+		//
+		// 如果调用者传递了 done != nil，它必须安排 done 有足够的缓冲区来容纳将使用该通道的同时 RPC 的数量。
+		// 如果通道完全没有缓冲，最好不要运行。
 		if cap(done) == 0 {
 			log.Panic("rpc: done channel is unbuffered")
 		}
@@ -317,6 +335,7 @@ func (client *Client) Go(serviceMethod string, args interface{}, reply interface
 }
 
 // Call invokes the named function, waits for it to complete, and returns its error status.
+// Call 调用命名函数，等待它完成，并返回其错误状态。
 func (client *Client) Call(serviceMethod string, args interface{}, reply interface{}) error {
 	call := <-client.Go(serviceMethod, args, reply, make(chan *Call, 1)).Done
 	return call.Error
