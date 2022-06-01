@@ -190,8 +190,10 @@ type Response struct {
 // 代表一个 RPC Server。
 type Server struct {
 	serviceMap sync.Map   // map[string]*service   服务名 - 服务
+
 	reqLock    sync.Mutex // protects freeReq
 	freeReq    *Request
+
 	respLock   sync.Mutex // protects freeResp
 	freeResp   *Response
 }
@@ -425,14 +427,19 @@ func (s *service) call(server *Server, sending *sync.Mutex, wg *sync.WaitGroup, 
 	mtype.numCalls++
 	mtype.Unlock()
 	function := mtype.method.Func
+
 	// Invoke the method, providing a new value for the reply.
+	// 调用方法，为回复提供一个新值。
 	returnValues := function.Call([]reflect.Value{s.rcvr, argv, replyv})
+
 	// The return value for the method is an error.
+	// 方法的返回值是一个错误。
 	errInter := returnValues[0].Interface()
 	errmsg := ""
 	if errInter != nil {
 		errmsg = errInter.(error).Error()
 	}
+
 	server.sendResponse(sending, req, replyv.Interface(), codec, errmsg)
 	server.freeRequest(req)
 }
@@ -511,6 +518,7 @@ func (server *Server) ServeCodec(codec ServerCodec) {
 	sending := new(sync.Mutex)
 	wg := new(sync.WaitGroup)
 	for {
+		// 服务、方法、请求、请求参数、返回值
 		service, mtype, req, argv, replyv, keepReading, err := server.readRequest(codec)
 		if err != nil {
 			if debugLog && err != io.EOF {
@@ -520,6 +528,7 @@ func (server *Server) ServeCodec(codec ServerCodec) {
 				break
 			}
 			// send a response if we actually managed to read a header.
+			// 如果我们确实设法读取了标头，则发送响应。
 			if req != nil {
 				server.sendResponse(sending, req, invalidRequest, codec, err.Error())
 				server.freeRequest(req)
@@ -595,6 +604,8 @@ func (server *Server) freeResponse(resp *Response) {
 	server.respLock.Unlock()
 }
 
+// 分别读取请求头、请求体
+// 根据客户端请求，获取服务器端对应的 服务、方法、请求、请求参数、返回值
 func (server *Server) readRequest(codec ServerCodec) (service *service, mtype *methodType, req *Request, argv, replyv reflect.Value, keepReading bool, err error) {
 	service, mtype, req, keepReading, err = server.readRequestHeader(codec)
 	if err != nil {
@@ -602,19 +613,26 @@ func (server *Server) readRequest(codec ServerCodec) (service *service, mtype *m
 			return
 		}
 		// discard body
+		// 请求头读取错误，则通过 nil 强制读取和丢弃请求主体
 		codec.ReadRequestBody(nil)
 		return
 	}
 
 	// Decode the argument value.
+	// 解码参数值
 	argIsValue := false // if true, need to indirect before calling.
 	if mtype.ArgType.Kind() == reflect.Ptr {
+		// New 返回一个 Value，表示指向指定类型的新零值的“指针”。
+		// 也就是说，返回的 Value 的 Type 是 PtrTo(typ)。
 		argv = reflect.New(mtype.ArgType.Elem())
 	} else {
 		argv = reflect.New(mtype.ArgType)
 		argIsValue = true
 	}
+
 	// argv guaranteed to be a pointer now.
+	// argv 现在保证是一个指针。
+	// 读取请求体
 	if err = codec.ReadRequestBody(argv.Interface()); err != nil {
 		return
 	}
@@ -633,6 +651,7 @@ func (server *Server) readRequest(codec ServerCodec) (service *service, mtype *m
 	return
 }
 
+// 读取请求头，根据请求头获取要调用的服务、方法、请求头
 func (server *Server) readRequestHeader(codec ServerCodec) (svc *service, mtype *methodType, req *Request, keepReading bool, err error) {
 	// Grab the request header.
 	// 获取请求头。
@@ -654,6 +673,7 @@ func (server *Server) readRequestHeader(codec ServerCodec) (svc *service, mtype 
 	keepReading = true
 
 	// LastIndex 返回 s 中最后一个 substr 实例的索引，如果 s 中不存在 substr，则返回 -1。
+	// 查找 服务名.方法名 字符串中， . 的位置
 	dot := strings.LastIndex(req.ServiceMethod, ".")
 	if dot < 0 {
 		err = errors.New("rpc: service/method request ill-formed: " + req.ServiceMethod)
@@ -715,6 +735,12 @@ func RegisterName(name string, rcvr interface{}) error {
 // connection. ReadRequestBody may be called with a nil
 // argument to force the body of the request to be read and discarded.
 // See NewClient's comment for information about concurrent access.
+//
+// ServerCodec 为 RPC 会话的“服务器端”实现 RPC 请求的读取和 RPC 响应的写入。
+// 服务器成对调用 ReadRequestHeader 和 ReadRequestBody 从连接中读取请求，并调用 WriteResponse 写回响应。
+// 服务器在完成连接后调用 Close。
+// 可以使用 nil 参数调用 ReadRequestBody 以强制读取和丢弃请求的主体。
+// 有关并发访问的信息，请参阅 NewClient 的注释。
 type ServerCodec interface {
 	ReadRequestHeader(*Request) error
 	ReadRequestBody(interface{}) error

@@ -51,7 +51,7 @@ type Client struct {
 	mutex    sync.Mutex // protects following
 	seq      uint64
 	pending  map[uint64]*Call
-	closing  bool // user has called Close
+	closing  bool // user has called Close         客户端主动关闭 func (client *Client) Close() error
 	shutdown bool // server has told us to stop
 }
 
@@ -64,6 +64,15 @@ type Client struct {
 // argument to force the body of the response to be read and then
 // discarded.
 // See NewClient's comment for information about concurrent access.
+//
+// ClientCodec 为 RPC 会话的客户端实现 RPC 请求的写入和 RPC 响应的读取。
+//
+// 客户端调用 WriteRequest 向连接写入请求，并成对调用 ReadResponseHeader 和 ReadResponseBody 读取响应。
+// 连接完成后，客户端调用 Close。
+//
+// 可以使用 nil 参数调用 ReadResponseBody 以强制读取响应的主体，然后将其丢弃。
+//
+// 有关并发访问的信息，请参阅 NewClient 的注释。
 type ClientCodec interface {
 	WriteRequest(*Request, interface{}) error
 	ReadResponseHeader(*Response) error
@@ -290,6 +299,8 @@ func Dial(network, address string) (*Client, error) {
 
 // Close calls the underlying codec's Close method. If the connection is already
 // shutting down, ErrShutdown is returned.
+//
+// Close 调用底层编解码器的 Close 方法。 如果连接已经关闭，则返回 ErrShutdown。
 func (client *Client) Close() error {
 	client.mutex.Lock()
 	if client.closing {

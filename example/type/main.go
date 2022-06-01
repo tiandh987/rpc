@@ -51,8 +51,15 @@ func main () {
 		// 如果 i 不在 [0, NumIn()) 范围内，它会 panic。
 		mIn1 :=mtype.In(1)
 
+		// Elem 返回一个类型的元素类型。
+		// 如果类型的 Kind 不是 Array、Chan、Map、Ptr 或 Slice，它会发生 panic。
+		// mIn1 类型为 string，引发 panic
+		//mIn1Elem := mIn1.Elem()
+
 		// Kind 返回此类型的具体种类。
 		mIn2 :=mtype.In(2)
+		// mIn2 类型为 *string
+		mIn2Elem := mIn2.Elem()
 
 		// NumOut 返回函数类型的输出参数计数。
 		// 如果类型的 Kind 不是 Func，它会 panic。
@@ -61,11 +68,14 @@ func main () {
 		// Out 返回函数类型的第 i 个输出参数的类型。
 		returnType := mtype.Out(0)
 
+
+
 		fmt.Printf("method: %+v\n", method)
 		fmt.Printf("method type: %+v\n", mtype)
 		fmt.Printf("method name: %+v\n", mname)
 		fmt.Printf("method mnum: %+v\n", mnum)
 		fmt.Printf("method mIn1: %+v\n", mIn1)
+		fmt.Printf("method mIn2Elem: %+v\n", mIn2Elem)
 		fmt.Printf("method mIn2: %+v\n", mIn2.Kind() == reflect.Ptr)
 		fmt.Printf("method mout: %+v\n", mout)
 		fmt.Printf("method returnType: %+v\n", returnType)
