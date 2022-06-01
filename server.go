@@ -187,7 +187,7 @@ type Response struct {
 // Server represents an RPC Server.
 // 代表一个 RPC Server。
 type Server struct {
-	serviceMap sync.Map   // map[string]*service
+	serviceMap sync.Map   // map[string]*service   服务名 - 服务
 	reqLock    sync.Mutex // protects freeReq
 	freeReq    *Request
 	respLock   sync.Mutex // protects freeResp
@@ -281,6 +281,7 @@ func (server *Server) register(rcvr interface{}, name string, useName bool) erro
 		str := ""
 
 		// To help the user, see if a pointer receiver would work.
+		// 为了帮助用户，看看指针接收器是否可以工作。
 		method := suitableMethods(reflect.PtrTo(s.typ), false)
 		if len(method) != 0 {
 			str = "rpc.Register: type " + sname + " has no exported methods of suitable type (hint: pass a pointer to value of that type)"
@@ -291,6 +292,10 @@ func (server *Server) register(rcvr interface{}, name string, useName bool) erro
 		return errors.New(str)
 	}
 
+	// LoadOrStore 返回键的现有值（如果存在）。 否则，它存储并返回给定的值。
+	// 如果值被加载，则加载结果为真，如果存储则为假。
+	//
+	// 存储 Service 到 Server
 	if _, dup := server.serviceMap.LoadOrStore(sname, s); dup {
 		return errors.New("rpc: service already defined: " + sname)
 	}
