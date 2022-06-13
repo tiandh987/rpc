@@ -180,9 +180,9 @@ type Request struct {
 // but documented here as an aid to debugging, such as when analyzing
 // network traffic.
 type Response struct {
-	ServiceMethod string    // echoes that of the Request
-	Seq           uint64    // echoes that of the request
-	Error         string    // error, if any.
+	ServiceMethod string    // echoes that of the Request   // 被调用的 服务.方法名
+	Seq           uint64    // echoes that of the request   // 本次调用 客户端生成的序列号
+	Error         string    // error, if any.               // 本次调用的错误信息
 	next          *Response // for free list in Server
 }
 
@@ -399,10 +399,14 @@ func (server *Server) sendResponse(sending *sync.Mutex, req *Request, reply inte
 	// Encode the response header
 	resp.ServiceMethod = req.ServiceMethod
 	if errmsg != "" {
+		// 本次调用错误的错误信息
 		resp.Error = errmsg
 		reply = invalidRequest
 	}
 	resp.Seq = req.Seq
+
+	// 这里有一把锁, 那发送响应的时候岂不是同步的, 谁拿到锁谁发
+	// 是不是为了保证 各个请求之间数据不冲突
 	sending.Lock()
 	err := codec.WriteResponse(resp, reply)
 	if debugLog && err != nil {
@@ -423,9 +427,12 @@ func (s *service) call(server *Server, sending *sync.Mutex, wg *sync.WaitGroup, 
 	if wg != nil {
 		defer wg.Done()
 	}
+
+	// 方法调用次数 +1
 	mtype.Lock()
 	mtype.numCalls++
 	mtype.Unlock()
+
 	function := mtype.method.Func
 
 	// Invoke the method, providing a new value for the reply.
@@ -440,6 +447,7 @@ func (s *service) call(server *Server, sending *sync.Mutex, wg *sync.WaitGroup, 
 		errmsg = errInter.(error).Error()
 	}
 
+	// 发送响应
 	server.sendResponse(sending, req, replyv.Interface(), codec, errmsg)
 	server.freeRequest(req)
 }
@@ -461,6 +469,7 @@ func (c *gobServerCodec) ReadRequestBody(body interface{}) error {
 }
 
 func (c *gobServerCodec) WriteResponse(r *Response, body interface{}) (err error) {
+	// 编码响应头
 	if err = c.enc.Encode(r); err != nil {
 		if c.encBuf.Flush() == nil {
 			// Gob couldn't encode the header. Should not happen, so if it does,
@@ -470,6 +479,7 @@ func (c *gobServerCodec) WriteResponse(r *Response, body interface{}) (err error
 		}
 		return
 	}
+	// 编码响应体
 	if err = c.enc.Encode(body); err != nil {
 		if c.encBuf.Flush() == nil {
 			// Was a gob problem encoding the body but the header has been written.
@@ -497,6 +507,12 @@ func (c *gobServerCodec) Close() error {
 // ServeConn uses the gob wire format (see package gob) on the
 // connection. To use an alternate codec, use ServeCodec.
 // See NewClient's comment for information about concurrent access.
+//
+// ServeConn 在单个连接上运行服务器。
+// ServeConn 阻塞，服务连接直到客户端挂断。
+// 调用者通常在 go 语句中调用 ServeConn。
+// ServeConn 在连接上使用 gob 格式（请参阅包 gob）。 要使用备用编解码器，请使用 ServeCodec。
+// 有关并发访问的信息，请参阅 NewClient 的注释。
 func (server *Server) ServeConn(conn io.ReadWriteCloser) {
 	// NewWriter 返回一个新的 Writer，其缓冲区具有默认大小（4096）。
 	buf := bufio.NewWriter(conn)
@@ -518,7 +534,7 @@ func (server *Server) ServeCodec(codec ServerCodec) {
 	sending := new(sync.Mutex)
 	wg := new(sync.WaitGroup)
 	for {
-		// 服务、方法、请求、请求参数、返回值
+		// 服务、方法、请求头、请求体(请求参数)、返回值
 		service, mtype, req, argv, replyv, keepReading, err := server.readRequest(codec)
 		if err != nil {
 			if debugLog && err != io.EOF {
@@ -536,6 +552,7 @@ func (server *Server) ServeCodec(codec ServerCodec) {
 			continue
 		}
 		wg.Add(1)
+		// 调用本地方法
 		go service.call(server, sending, wg, mtype, req, argv, replyv, codec)
 	}
 	// We've seen that there are no more requests.
@@ -546,6 +563,9 @@ func (server *Server) ServeCodec(codec ServerCodec) {
 
 // ServeRequest is like ServeCodec but synchronously serves a single request.
 // It does not close the codec upon completion.
+//
+// ServeRequest 类似于 ServeCodec，但同步服务单个请求。
+// 它不会在完成后关闭编解码器。
 func (server *Server) ServeRequest(codec ServerCodec) error {
 	sending := new(sync.Mutex)
 	service, mtype, req, argv, replyv, keepReading, err := server.readRequest(codec)
@@ -564,12 +584,14 @@ func (server *Server) ServeRequest(codec ServerCodec) error {
 	return nil
 }
 
+// 获取 Request
 func (server *Server) getRequest() *Request {
 	server.reqLock.Lock()
 	req := server.freeReq
 	if req == nil {
 		req = new(Request)
 	} else {
+		// 这里没看懂什么意思
 		server.freeReq = req.next
 		*req = Request{}
 	}
@@ -577,6 +599,7 @@ func (server *Server) getRequest() *Request {
 	return req
 }
 
+// 释放掉 Request
 func (server *Server) freeRequest(req *Request) {
 	server.reqLock.Lock()
 	req.next = server.freeReq
@@ -607,6 +630,7 @@ func (server *Server) freeResponse(resp *Response) {
 // 分别读取请求头、请求体
 // 根据客户端请求，获取服务器端对应的 服务、方法、请求、请求参数、返回值
 func (server *Server) readRequest(codec ServerCodec) (service *service, mtype *methodType, req *Request, argv, replyv reflect.Value, keepReading bool, err error) {
+	// 根据请求头,读取 服务、方法类型、请求头
 	service, mtype, req, keepReading, err = server.readRequestHeader(codec)
 	if err != nil {
 		if !keepReading {
@@ -632,7 +656,7 @@ func (server *Server) readRequest(codec ServerCodec) (service *service, mtype *m
 
 	// argv guaranteed to be a pointer now.
 	// argv 现在保证是一个指针。
-	// 读取请求体
+	// 读取请求体(方法参数)到 argv
 	if err = codec.ReadRequestBody(argv.Interface()); err != nil {
 		return
 	}
@@ -651,11 +675,12 @@ func (server *Server) readRequest(codec ServerCodec) (service *service, mtype *m
 	return
 }
 
-// 读取请求头，根据请求头获取要调用的服务、方法、请求头
+// 读取请求头，根据请求头获取要调用的: 服务、方法、请求头
 func (server *Server) readRequestHeader(codec ServerCodec) (svc *service, mtype *methodType, req *Request, keepReading bool, err error) {
 	// Grab the request header.
 	// 获取请求头。
 	req = server.getRequest()
+	// 解码请求头到 req
 	err = codec.ReadRequestHeader(req)
 	if err != nil {
 		req = nil
@@ -686,6 +711,7 @@ func (server *Server) readRequestHeader(codec ServerCodec) (svc *service, mtype 
 	methodName := req.ServiceMethod[dot+1:]
 
 	// Look up the request.
+	// 根据服务名,在 serviceMap 中查找对应服务
 	svci, ok := server.serviceMap.Load(serviceName)
 	if !ok {
 		err = errors.New("rpc: can't find service " + req.ServiceMethod)
@@ -706,6 +732,10 @@ func (server *Server) readRequestHeader(codec ServerCodec) (svc *service, mtype 
 // for each incoming connection. Accept blocks until the listener
 // returns a non-nil error. The caller typically invokes Accept in a
 // go statement.
+//
+// Accept 接受 listener 上的连接并为每个传入连接提供请求。
+// Accept 阻塞，直到 listener 返回非零错误。
+// 调用者通常在 go 语句中调用 Accept。
 func (server *Server) Accept(lis net.Listener) {
 	for {
 		conn, err := lis.Accept()
@@ -806,6 +836,9 @@ func (server *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 // HandleHTTP registers an HTTP handler for RPC messages on rpcPath,
 // and a debugging handler on debugPath.
 // It is still necessary to invoke http.Serve(), typically in a go statement.
+//
+// HandleHTTP 在 rpcPath 上为 RPC 消息注册一个 HTTP 处理程序，在 debugPath 上注册一个调试处理程序。
+// 仍然需要调用 http.Serve()，通常在 go 语句中。
 func (server *Server) HandleHTTP(rpcPath, debugPath string) {
 	http.Handle(rpcPath, server)
 	http.Handle(debugPath, debugHTTP{server})

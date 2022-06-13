@@ -114,17 +114,24 @@ func (client *Client) send(call *Call) {
 	}
 }
 
+// NewClientWithCodec 启动一个协程调用该方法,来接收 rpc 调用的响应
 func (client *Client) input() {
 	var err error
 	var response Response
 	for err == nil {
 		response = Response{}
+		// 读取响应头
 		err = client.codec.ReadResponseHeader(&response)
 		if err != nil {
 			break
 		}
+
+		// 获取rpc请求序列化号
 		seq := response.Seq
+
 		client.mutex.Lock()
+		// 根据响应带回来的序列号, 从 pending 中获取对应的 call
+		// 每一个 call 代表一次正在进行的 rpc 请求
 		call := client.pending[seq]
 		delete(client.pending, seq)
 		client.mutex.Unlock()
@@ -136,6 +143,10 @@ func (client *Client) input() {
 			// removed; response is a server telling us about an
 			// error reading request body. We should still attempt
 			// to read error body, but there's no one to give it to.
+			// 我们没有待处理的call。
+			// 这通常意味着 WriteRequest 部分失败，并且 call 已被删除；
+			// response 是服务器告诉我们读取 请求body 的错误。
+			// 我们仍然应该尝试读取 erro body，但不能将其交给任何人。
 			err = client.codec.ReadResponseBody(nil)
 			if err != nil {
 				err = errors.New("reading error body: " + err.Error())
@@ -144,6 +155,8 @@ func (client *Client) input() {
 			// We've got an error response. Give this to the request;
 			// any subsequent requests will get the ReadResponseBody
 			// error if there is one.
+			// 我们收到了错误响应。 将此交给请求；
+			// 如果有任何后续请求，则会收到 ReadResponseBody 错误。
 			call.Error = ServerError(response.Error)
 			err = client.codec.ReadResponseBody(nil)
 			if err != nil {
@@ -158,6 +171,7 @@ func (client *Client) input() {
 			call.done()
 		}
 	}
+
 	// Terminate pending calls.
 	client.reqMutex.Lock()
 	client.mutex.Lock()
